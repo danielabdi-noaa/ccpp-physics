@@ -152,7 +152,7 @@ contains
 
      integer, intent(in) :: do_capsuppress
      real(kind=kind_phys), intent(in), dimension(:) :: cap_suppress_j
-!$acc declare create(cap_suppress_j)
+!$acc declare copyin(cap_suppress_j)
   !
   ! 
   !
@@ -359,6 +359,7 @@ contains
       zcutdown,depth_min,zkbmax,z_detr,zktop,                            &
       dh,cap_maxs,trash,trash2,frh,sig_thresh
      real(kind=kind_phys), dimension (its:ite) :: pefc
+!$acc declare create(pefc)
      real(kind=kind_phys) entdo,dp,subin,detdo,entup,                    &
       detup,subdown,entdoj,entupk,detupk,totmas
 
@@ -546,8 +547,7 @@ contains
       start_level(:)=kte
 !$acc end kernels
 
-!$acc kernels
-!$acc loop private(radius,frh)
+!$acc parallel loop private(radius,frh)
       do i=its,ite
          c1d(i,:)= 0. !c1 ! 0. ! c1 ! max(.003,c1+float(csum(i))*.0001)
          entr_rate(i)=7.e-5 - min(20.,float(csum(i))) * 3.e-6
@@ -566,7 +566,7 @@ contains
          frh_out(i) = frh
          if((dx(i)<dx_thresh).and.(forcing(i,7).eq.0.))sig(i)=1.
       enddo
-!$acc end kernels
+!$acc end parallel
       sig_thresh = (1.-frh_thresh)**2
 
       
@@ -1940,6 +1940,7 @@ contains
         enddo
       enddo
 !$acc end kernels
+
       call cup_forcing_ens_3d(closure_n,xland1,aa0,aa1,xaa0_ens,mbdt,dtime, &
            ierr,ierr2,ierr3,xf_ens,axx,forcing,                             &
            maxens3,mconv,rand_clos,                                         &
@@ -1948,11 +1949,11 @@ contains
            imid,ipr,itf,ktf,                                                &
            its,ite, kts,kte,                                                &
            dicycle,tau_ecmwf,aa1_bl,xf_dicycle)
+!
+!$acc kernels
       do i=its,itf
        if((dx(i)<dx_thresh).and.(forcing(i,3).le.0.))sig(i)=1.
       enddo
-!
-!$acc kernels
       do k=kts,ktf
       do i=its,itf
         if(ierr(i).eq.0)then
@@ -2465,7 +2466,7 @@ contains
         ,intent (inout)                   ::                 &
         ierr
 !$acc declare copyin(rho,us,vs,z,p,pw,pwav,pwev,psum2,psumh,edtmax,edtmin,ktop,kbcon)
-!$acc declare copyout(edtc,edt) copy(ccn,ierr)
+!$acc declare copyout(edtc,pefc,edt) copy(ccn,ierr)
 !
 !  local variables in this routine
 !
@@ -2820,7 +2821,7 @@ contains
 ! --- calculate heights
 !$acc loop seq
          do k=kts+1,ktf
-!$acc loop private(tvbar)
+!$acc loop independent private(tvbar)
          do i=its,itf
            if(ierr(i).eq.0)then
               tvbar=.5*tv(i,k)+.5*tv(i,k-1)
@@ -3091,8 +3092,7 @@ contains
 
 !--- large scale forcing
 !
-!$acc kernels
-!$acc loop private(xff_ens3,xk)
+!$acc parallel loop private(xff_ens3,xk)
        do 100 i=its,itf
           kloc(i)=1
           if(ierr(i).eq.0)then
@@ -3332,15 +3332,14 @@ contains
              enddo
           endif ! ierror
  100   continue
- !$acc end kernels
+!$acc end parallel
 
 
 !-
 !- diurnal cycle mass flux
 !-              
 if(dicycle == 1 )then
-!$acc kernels
-!$acc loop private(xk)
+!$acc parallel loop private(xk)
        do i=its,itf           
           xf_dicycle(i) = 0.
           if(ierr(i) /=  0)cycle
@@ -3357,7 +3356,7 @@ if(dicycle == 1 )then
             xf_dicycle(i)= xf_ens(i,10)-xf_dicycle(i)
 !            forcing(i,6)=xf_dicycle(i)
        enddo
-!$acc end kernels
+!$acc end parallel
 else
 !$acc kernels
        xf_dicycle(:) = 0.
@@ -3765,8 +3764,7 @@ endif
         names=1.
       endif
       scalef=86400.
-!$acc kernels
-!$acc loop private(qmemf,qmem,icheck)
+!$acc parallel loop private(qmemf,qmem,icheck)
       do i=its,itf
       if(ktop(i) <= 2)cycle
       icheck=0
@@ -3800,7 +3798,7 @@ endif
       enddo
       pret(i)=pret(i)*qmemf 
       enddo
-!$acc end kernels
+!$acc end parallel
 !      return
 !
 ! check whether routine produces negative q's. this can happen, since 
@@ -3811,8 +3809,7 @@ endif
 !      return
 !      write(14,*)'return'
       thresh=1.e-32
-!$acc kernels
-!$acc loop private(qmemf,qmem,icheck)
+!$acc parallel loop private(qmemf,qmem,icheck)
       do i=its,itf
       if(ktop(i) <= 2)cycle
       qmemf=1.
@@ -3841,7 +3838,7 @@ endif
       enddo
       pret(i)=pret(i)*qmemf 
       enddo
-!$acc end kernels
+!$acc end parallel
    end subroutine neg_check
 
 !> This subroutine calculates final output fields including
