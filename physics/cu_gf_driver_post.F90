@@ -37,7 +37,9 @@ module cu_gf_driver_post
       real(kind_phys),  intent(in)  :: raincv(:), maxupmf(:)
       real(kind_phys),  intent(inout) :: refl_10cm(:,:)
       character(len=*), intent(out) :: errmsg
-!$acc declare copyin(t,q,cactiv,cactiv_m) copyout(prevst,prevsq,conv_act,conv_act_m)
+!$acc declare copyin(t,q,cactiv,cactiv_m,raincv,maxupmf) &
+!$acc         copyout(prevst,prevsq,conv_act,conv_act_m) &
+!$acc         copy(refl_10cm)
       integer, intent(out)          :: errflg
 
       ! Local variables

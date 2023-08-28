@@ -237,6 +237,8 @@ contains
 
      real(kind=kind_phys), parameter :: zero = 0
 
+     real(kind=kind_phys), dimension(kts:kte) :: tempa
+
 !$acc kernels
      start_level(:)=0
      rand_vmas(:)=0.
@@ -455,13 +457,14 @@ contains
                            kbcon,kstabi,dtempdz,itf,ktf,its,ite, kts,kte)
 !
 !
-!$acc parallel loop private(frh,kstart,x_add)
+!$acc parallel loop private(tempa,frh,kstart,x_add)
       do i=its,itf
          entr_rate_2d(i,:)=entr_rate(i)
          if(ierr(i) == 0)then
             start_level(i)=k22(i)
             x_add = xlv*zqexec(i)+cp*ztexec(i)
-            call get_cloud_bc(kte,he_cup (i,1:kte),hkb (i),k22(i),x_add)
+            tempa(1:kte) = he_cup(i,1:kte)
+            call get_cloud_bc(kte,tempa,hkb (i),k22(i),x_add)
             if(kbcon(i).gt.ktf-4)then
                 ierr(i)=231
             endif
@@ -571,7 +574,7 @@ contains
 !
 !
 
-!$acc parallel loop private(ki,qaver,k,trash,trash2,dz,dp)
+!$acc parallel loop private(tempa,ki,qaver,k,trash,trash2,dz,dp)
       do 42 i=its,itf
         dbyt(i,:)=0.
         if(ierr(i) /= 0) cycle
@@ -624,7 +627,8 @@ contains
              go to 42
          endif
 !
-         call get_cloud_bc(kte,qo_cup (i,1:kte),qaver,k22(i),zero)
+         tempa(1:kte) = qo_cup (i, 1:kte)
+         call get_cloud_bc(kte,tempa,qaver,k22(i),zero)
          qaver = qaver + zqexec(i)
          do k=1,start_level(i)-1
            qco (i,k)= qo_cup(i,k)
@@ -885,11 +889,12 @@ contains
       enddo
 !$acc end kernels
 
-!$acc parallel loop private(x_add)
+!$acc parallel loop private(tempa,x_add,k)
       do i=its,itf
         if(ierr(i).eq.0)then
          x_add = xlv*zqexec(i)+cp*ztexec(i)
-         call get_cloud_bc(kte,xhe_cup (i,1:kte),xhkb (i),k22(i),x_add)
+         tempa(1:kte) = xhe_cup(i,1:kte)
+         call get_cloud_bc(kte,tempa,xhkb (i),k22(i),x_add)
          do k=1,start_level(i)-1
             xhc(i,k)=xhe_cup(i,k)
          enddo

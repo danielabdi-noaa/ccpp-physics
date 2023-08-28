@@ -152,7 +152,7 @@ contains
 
      integer, intent(in) :: do_capsuppress
      real(kind=kind_phys), intent(in), dimension(:) :: cap_suppress_j
-!$acc declare create(cap_suppress_j)
+!$acc declare copyin(cap_suppress_j)
   !
   ! 
   !
@@ -359,6 +359,7 @@ contains
       zcutdown,depth_min,zkbmax,z_detr,zktop,                            &
       dh,cap_maxs,trash,trash2,frh,sig_thresh
      real(kind=kind_phys), dimension (its:ite) :: pefc
+!$acc declare create(pefc)
      real(kind=kind_phys) entdo,dp,subin,detdo,entup,                    &
       detup,subdown,entdoj,entupk,detupk,totmas
 
@@ -415,6 +416,7 @@ contains
 !$acc declare create(p_liq_ice,melting_layer,melting)
 
      integer :: itemp
+     real(kind=kind_phys), dimension(kts:kte) :: tempa
 
 !---meltglac-------------------------------------------------
 !$acc kernels
@@ -546,8 +548,7 @@ contains
       start_level(:)=kte
 !$acc end kernels
 
-!$acc kernels
-!$acc loop private(radius,frh)
+!$acc parallel loop private(radius,frh)
       do i=its,ite
          c1d(i,:)= 0. !c1 ! 0. ! c1 ! max(.003,c1+float(csum(i))*.0001)
          entr_rate(i)=7.e-5 - min(20.,float(csum(i))) * 3.e-6
@@ -566,7 +567,7 @@ contains
          frh_out(i) = frh
          if((dx(i)<dx_thresh).and.(forcing(i,7).eq.0.))sig(i)=1.
       enddo
-!$acc end kernels
+!$acc end parallel
       sig_thresh = (1.-frh_thresh)**2
 
       
@@ -745,12 +746,14 @@ contains
 !> - call get_cloud_bc() and cup_kbcon() to determine the 
 !! level of convective cloud base (\p kbcon)
 !
-!$acc parallel loop private(x_add)
+!$acc parallel loop private(x_add,tempa)
       do i=its,itf
        if(ierr(i).eq.0)then
          x_add = xlv*zqexec(i)+cp*ztexec(i)
-         call get_cloud_bc(kte,he_cup (i,1:kte),hkb (i),k22(i),x_add)
-         call get_cloud_bc(kte,heo_cup (i,1:kte),hkbo (i),k22(i),x_add)
+         tempa(1:kte) = he_cup(i,1:kte)
+         call get_cloud_bc(kte,tempa,hkb (i),k22(i),x_add)
+         tempa(1:kte) = heo_cup(i,1:kte)
+         call get_cloud_bc(kte,tempa,hkbo (i),k22(i),x_add)
        endif ! ierr
       enddo
 !$acc end parallel
@@ -770,7 +773,7 @@ contains
       call cup_minimi(heso_cup,kbcon,kstabm,kstabi,ierr,                        &
            itf,ktf,                                                             &
            its,ite, kts,kte)
-!$acc parallel loop private(frh,x_add)
+!$acc parallel loop private(frh,x_add,tempa)
       do i=its,itf
          if(ierr(i) == 0)then
            frh = min(qo_cup(i,kbcon(i))/qeso_cup(i,kbcon(i)),1.)
@@ -794,7 +797,8 @@ contains
 !
             start_level(i)=k22(i)
             x_add = xlv*zqexec(i)+cp*ztexec(i)
-            call get_cloud_bc(kte,he_cup (i,1:kte),hkb (i),k22(i),x_add)
+            tempa(1:kte) = he_cup(i, 1:kte)
+            call get_cloud_bc(kte,tempa,hkb (i),k22(i),x_add)
          endif
       enddo
 !$acc end parallel
@@ -1800,11 +1804,12 @@ contains
       enddo
       enddo
 !$acc end kernels
-!$acc parallel loop private(x_add,k)
+!$acc parallel loop private(x_add,k,tempa)
       do i=its,itf
         if(ierr(i).eq.0)then
          x_add = xlv*zqexec(i)+cp*ztexec(i)
-         call get_cloud_bc(kte,xhe_cup (i,1:kte),xhkb (i),k22(i),x_add)
+         tempa(1:kte) = xhe_cup(i,1:kte)
+         call get_cloud_bc(kte,tempa,xhkb (i),k22(i),x_add)
          do k=1,start_level(i)-1
             xhc(i,k)=xhe_cup(i,k)
          enddo
@@ -1940,6 +1945,7 @@ contains
         enddo
       enddo
 !$acc end kernels
+
       call cup_forcing_ens_3d(closure_n,xland1,aa0,aa1,xaa0_ens,mbdt,dtime, &
            ierr,ierr2,ierr3,xf_ens,axx,forcing,                             &
            maxens3,mconv,rand_clos,                                         &
@@ -1948,11 +1954,11 @@ contains
            imid,ipr,itf,ktf,                                                &
            its,ite, kts,kte,                                                &
            dicycle,tau_ecmwf,aa1_bl,xf_dicycle)
+!
+!$acc kernels
       do i=its,itf
        if((dx(i)<dx_thresh).and.(forcing(i,3).le.0.))sig(i)=1.
       enddo
-!
-!$acc kernels
       do k=kts,ktf
       do i=its,itf
         if(ierr(i).eq.0)then
@@ -2465,7 +2471,7 @@ contains
         ,intent (inout)                   ::                 &
         ierr
 !$acc declare copyin(rho,us,vs,z,p,pw,pwav,pwev,psum2,psumh,edtmax,edtmin,ktop,kbcon)
-!$acc declare copyout(edtc,edt) copy(ccn,ierr)
+!$acc declare copyout(edtc,pefc,edt) copy(ccn,ierr)
 !
 !  local variables in this routine
 !
@@ -2820,7 +2826,7 @@ contains
 ! --- calculate heights
 !$acc loop seq
          do k=kts+1,ktf
-!$acc loop private(tvbar)
+!$acc loop independent private(tvbar)
          do i=its,itf
            if(ierr(i).eq.0)then
               tvbar=.5*tv(i,k)+.5*tv(i,k-1)
@@ -3091,8 +3097,7 @@ contains
 
 !--- large scale forcing
 !
-!$acc kernels
-!$acc loop private(xff_ens3,xk)
+!$acc parallel loop private(xff_ens3,xk)
        do 100 i=its,itf
           kloc(i)=1
           if(ierr(i).eq.0)then
@@ -3332,15 +3337,14 @@ contains
              enddo
           endif ! ierror
  100   continue
- !$acc end kernels
+!$acc end parallel
 
 
 !-
 !- diurnal cycle mass flux
 !-              
 if(dicycle == 1 )then
-!$acc kernels
-!$acc loop private(xk)
+!$acc parallel loop private(xk)
        do i=its,itf           
           xf_dicycle(i) = 0.
           if(ierr(i) /=  0)cycle
@@ -3357,7 +3361,7 @@ if(dicycle == 1 )then
             xf_dicycle(i)= xf_ens(i,10)-xf_dicycle(i)
 !            forcing(i,6)=xf_dicycle(i)
        enddo
-!$acc end kernels
+!$acc end parallel
 else
 !$acc kernels
        xf_dicycle(:) = 0.
@@ -3430,6 +3434,7 @@ endif
      real(kind=kind_phys), dimension (its:ite,kts:kte) ::hcot
 !$acc declare create(hcot)
 
+     real(kind=kind_phys), dimension(kts:kte) :: tempa
 !
 !--- determine the level of convective cloud base  - kbcon
 !
@@ -3437,13 +3442,13 @@ endif
       iloop(:)=iloop_in
 !$acc end kernels
 
-!$acc parallel loop
+!$acc parallel loop private(tempa)
        do 27 i=its,itf
       kbcon(i)=1
 !
 ! reset iloop for mid level convection
       if(cap_max(i).gt.200 .and. imid.eq.1)iloop(i)=5
-!
+
       if(ierr(i).ne.0)go to 27
       start_level(i)=k22(i)
       kbcon(i)=k22(i)+1
@@ -3460,22 +3465,19 @@ endif
         enddo
        !==
 
-      go to 32
- 31   continue
-      kbcon(i)=kbcon(i)+1
-      if(kbcon(i).gt.kbmax(i)+2)then
-         if(iloop(i).ne.4)then
-                ierr(i)=3
-#ifndef _OPENACC
-                ierrc(i)="could not find reasonable kbcon in cup_kbcon"
-#endif
-         endif
-        go to 27
-      endif
- 32   continue
+ 32 continue
       hetest=hcot(i,kbcon(i)) !hkb(i) ! he_cup(i,k22(i))
       if(hetest.lt.hes_cup(i,kbcon(i)))then
-        go to 31
+          kbcon(i)=kbcon(i)+1
+          if(kbcon(i).gt.kbmax(i)+2)then
+             if(iloop(i).ne.4)then
+                    ierr(i)=3
+    #ifndef _OPENACC
+                    ierrc(i)="could not find reasonable kbcon in cup_kbcon"
+    #endif
+             endif
+            go to 27
+          endif
       endif
 
 !     cloud base pressure and max moist static energy pressure
@@ -3485,7 +3487,7 @@ endif
       pbcdif=-p_cup(i,kbcon(i))+p_cup(i,k22(i))
       plus=max(25.,cap_max(i)-float(iloop(i)-1)*cap_inc(i))
       if(iloop(i).eq.4)plus=cap_max(i)
-!
+
 ! for shallow convection, if cap_max is greater than 25, it is the pressure at pbltop
       if(iloop(i).eq.5)plus=150.
         if(iloop(i).eq.5.and.cap_max(i).gt.200)pbcdif=-p_cup(i,kbcon(i))+cap_max(i)
@@ -3496,7 +3498,8 @@ endif
         kbcon(i)=k22(i)+1
 !==     since k22 has be changed, hkb has to be re-calculated
         x_add = xlv*zqexec(i)+cp*ztexec(i)
-        call get_cloud_bc(kte,he_cup (i,1:kte),hkb (i),k22(i),x_add)
+        tempa(1:kte) = he_cup(i, 1:kte)
+        call get_cloud_bc(kte,tempa,hkb (i),k22(i),x_add)
 
         start_level(i)=k22(i)
 !        if(iloop_in.eq.5)start_level(i)=kbcon(i)
@@ -3524,7 +3527,7 @@ endif
         go to 32
       endif
  27   continue
- !$acc end parallel
+!$acc end parallel
 
    end subroutine cup_kbcon
 
@@ -3765,8 +3768,7 @@ endif
         names=1.
       endif
       scalef=86400.
-!$acc kernels
-!$acc loop private(qmemf,qmem,icheck)
+!$acc parallel loop private(qmemf,qmem,icheck)
       do i=its,itf
       if(ktop(i) <= 2)cycle
       icheck=0
@@ -3800,7 +3802,7 @@ endif
       enddo
       pret(i)=pret(i)*qmemf 
       enddo
-!$acc end kernels
+!$acc end parallel
 !      return
 !
 ! check whether routine produces negative q's. this can happen, since 
@@ -3811,8 +3813,7 @@ endif
 !      return
 !      write(14,*)'return'
       thresh=1.e-32
-!$acc kernels
-!$acc loop private(qmemf,qmem,icheck)
+!$acc parallel loop private(qmemf,qmem,icheck)
       do i=its,itf
       if(ktop(i) <= 2)cycle
       qmemf=1.
@@ -3841,7 +3842,7 @@ endif
       enddo
       pret(i)=pret(i)*qmemf 
       enddo
-!$acc end kernels
+!$acc end parallel
    end subroutine neg_check
 
 !> This subroutine calculates final output fields including
@@ -4209,6 +4210,8 @@ endif
 !$acc declare create(prop_b)
 !
      real(kind=kind_phys), parameter:: zero = 0
+     real(kind=kind_phys), dimension(1:kte):: tempa
+
      logical :: is_mid, is_deep
 
         is_mid = (name == 'mid')
@@ -4251,11 +4254,12 @@ endif
         enddo
 !$acc end kernels
 
-!$acc parallel loop private(start_level,qaver,k)
+!$acc parallel loop private(tempa,start_level,qaver,k)
       do i=its,itf
       if(ierr(i).eq.0)then
          start_level=k22(i)
-         call get_cloud_bc(kte,qe_cup (i,1:kte),qaver,k22(i),zero)
+         tempa(1:kte) = qe_cup(i,1:kte)
+         call get_cloud_bc(kte,tempa,qaver,k22(i),zero)
          qaver = qaver 
          k=start_level(i)
          qc (i,k)= qaver 
@@ -5094,7 +5098,7 @@ endif
 !!!!>\ingroup cu_gf_deep_group
 !!!!> This function calcualtes
 !!! function deriv3(xx, xi, yi, ni, m)
-!!!!$acc routine vector
+!!!$acc routine vector
 !!!    !============================================================================*/
 !!!    ! evaluate first- or second-order derivatives 
 !!!    ! using three-point lagrange interpolation 
